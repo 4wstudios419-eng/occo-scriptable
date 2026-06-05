@@ -16,4 +16,4 @@ Loader:
 https://occo-widget.netlify.app/loader.js
 
 Dashboard Endpoint:
-[Apps Script URL]
+https://script.google.com/macros/s/AKfycbxjqt_Z5iNL6Ny_JbAyJzIYs6zMN3Zz2NshcJjJb9eGY_1xt91JoN7sYTmE4qoLg_d2pg/exec
