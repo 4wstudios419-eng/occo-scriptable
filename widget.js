@@ -43,7 +43,19 @@ try {
 
   w.addSpacer(6);
 
-  addRow("On Call", data.onCallInvestigator);
+  addSection("On Call");
+  addRow("Investigator", data.onCallInvestigator);
+
+  if (data.onCallUntil) {
+    addRow("Through", data.onCallUntil);
+  }
+
+  if (data.nextUpInvestigator) {
+    addRow("Next Up", data.nextUpInvestigator);
+  }
+
+  w.addSpacer(6);
+
   addRow("Funeral Home", data.funeralHomeOfMonth);
 
   if (data.autopsyTox) {
@@ -83,6 +95,12 @@ function addSubheader(text) {
   line.textColor = Color.white();
   line.font = Font.mediumSystemFont(11);
   line.centerAlignText();
+}
+
+function addSection(text) {
+  let line = w.addText(text);
+  line.textColor = new Color("#e8b832");
+  line.font = Font.boldSystemFont(12);
 }
 
 function addBig(label, value) {
