@@ -43,24 +43,35 @@ try {
 
   w.addSpacer(6);
 
-  addSection("On Call");
-  addRow("Investigator", data.onCallInvestigator);
+addSection("On Call");
+addRow("Investigator", data.onCallInvestigator);
 
-  if (data.onCallUntil) {
-    addRow("Through", data.onCallUntil);
-  }
+if (data.currentInvestigatorPhone) {
+  addRow("Phone", data.currentInvestigatorPhone);
+}
 
-  if (data.nextUpInvestigator) {
-    addRow("Next Up", data.nextUpInvestigator);
-  }
+if (data.onCallUntil) {
+  addRow("Through", data.onCallUntil);
+}
+
+if (data.nextUpInvestigator) {
+  addRow("Next Up", data.nextUpInvestigator);
+}
+
+if (data.coverageStatus === "WARNING") {
+  addRow("Coverage", "WARNING");
+}
 
   w.addSpacer(6);
 
   addRow("Funeral Home", data.funeralHomeOfMonth);
 
-  if (data.autopsyTox) {
-    addRow("Pending", data.autopsyTox.pending);
-    addRow("Complete", data.autopsyTox.complete);
+  if (data.currentInvestigatorPhone) {
+    addRow("Phone", data.currentInvestigatorPhone);
+  }
+
+  if (data.coverageStatus === "WARNING") {
+    addRow("Coverage", "WARNING");
   }
 
   w.addSpacer(8);
