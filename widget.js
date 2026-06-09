@@ -7,7 +7,7 @@ const BADGE_URL = "https://drive.google.com/uc?export=view&id=19XiusP7KOBAozk2Fh
 let w = new ListWidget();
 w.url = "https://occoops.netlify.app/";
 w.backgroundColor = new Color("#0a0a0a");
-w.setPadding(12, 12, 12, 12);
+w.setPadding(10, 12, 10, 12);
 
 try {
   const req = new Request(DASHBOARD_URL);
@@ -28,53 +28,34 @@ try {
   badgeOuter.addSpacer();
 
   const badgeImg = badgeOuter.addImage(badge);
-  badgeImg.imageSize = new Size(82, 82);
+  badgeImg.imageSize = new Size(58, 58);
 
   badgeOuter.addSpacer();
 
-  w.addSpacer(4);
+  w.addSpacer(3);
 
   addHeader("OTTAWA COUNTY");
   addSubheader("CORONER'S OFFICE");
 
-  w.addSpacer(8);
+  w.addSpacer(6);
 
   addBig("Next Case", data.nextCaseNumber);
 
-  w.addSpacer(6);
+  w.addSpacer(5);
 
-addSection("On Call");
-addRow("Investigator", data.onCallInvestigator);
-
-if (data.currentInvestigatorPhone) {
-  addRow("Phone", data.currentInvestigatorPhone);
-}
-
-if (data.onCallUntil) {
-  addRow("Through", data.onCallUntil);
-}
-
-if (data.nextUpInvestigator) {
-  addRow("Next Up", data.nextUpInvestigator);
-}
-
-if (data.coverageStatus === "WARNING") {
-  addRow("Coverage", "WARNING");
-}
-
-  w.addSpacer(6);
-
-  addRow("Funeral Home", data.funeralHomeOfMonth);
+  addSection("On Call");
+  addRow("Investigator", data.onCallInvestigator);
 
   if (data.currentInvestigatorPhone) {
     addRow("Phone", data.currentInvestigatorPhone);
   }
 
-  if (data.coverageStatus === "WARNING") {
-    addRow("Coverage", "WARNING");
-  }
+  w.addSpacer(5);
 
-  w.addSpacer(8);
+  addSection("Funeral Home");
+  addRow("", data.funeralHomeOfMonth);
+
+  w.addSpacer(5);
 
   addWeather(temp, feels, wx);
 
@@ -97,57 +78,61 @@ Script.complete();
 function addHeader(text) {
   let line = w.addText(text);
   line.textColor = new Color("#e8b832");
-  line.font = Font.boldSystemFont(16);
+  line.font = Font.boldSystemFont(15);
   line.centerAlignText();
 }
 
 function addSubheader(text) {
   let line = w.addText(text);
   line.textColor = Color.white();
-  line.font = Font.mediumSystemFont(11);
+  line.font = Font.mediumSystemFont(10);
   line.centerAlignText();
 }
 
 function addSection(text) {
   let line = w.addText(text);
   line.textColor = new Color("#e8b832");
-  line.font = Font.boldSystemFont(12);
+  line.font = Font.boldSystemFont(11);
 }
 
 function addBig(label, value) {
   let lbl = w.addText(label);
   lbl.textColor = Color.gray();
-  lbl.font = Font.systemFont(10);
+  lbl.font = Font.systemFont(9);
 
   let val = w.addText(value || "—");
   val.textColor = Color.white();
-  val.font = Font.boldSystemFont(28);
+  val.font = Font.boldSystemFont(27);
 }
 
 function addRow(label, value) {
-  let row = w.addText(`${label}: ${value || "—"}`);
+  let text = label
+    ? `${label}: ${value || "—"}`
+    : `${value || "—"}`;
+
+  let row = w.addText(text);
   row.textColor = Color.white();
-  row.font = Font.systemFont(12);
+  row.font = Font.systemFont(11);
 }
 
 function addWeather(temp, feels, label) {
   let title = w.addText("Weather");
   title.textColor = new Color("#e8b832");
-  title.font = Font.boldSystemFont(12);
+  title.font = Font.boldSystemFont(11);
 
   let line = w.addText(`${temp}°F • Feels ${feels}°`);
   line.textColor = Color.white();
-  line.font = Font.boldSystemFont(15);
+  line.font = Font.boldSystemFont(14);
 
   let desc = w.addText(label);
   desc.textColor = Color.gray();
-  desc.font = Font.systemFont(10);
+  desc.font = Font.systemFont(9);
 }
 
 function addFooter(text) {
   let line = w.addText(text);
   line.textColor = Color.gray();
-  line.font = Font.systemFont(9);
+  line.font = Font.systemFont(8);
 }
 
 function formatTime(value) {
