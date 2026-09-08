@@ -270,8 +270,9 @@ async function getProfile(session) {
 async function postJson(url, body, token) {
   const req = new Request(url);
   req.method = "POST";
-  req.headers = { apikey: SUPABASE_KEY, "Content-Type": "application/json" };
-  if (token) req.headers.Authorization = `Bearer ${token}`;
+  const headers = { apikey: SUPABASE_KEY, "Content-Type": "application/json" };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  req.headers = headers;
   req.body = JSON.stringify(body);
   const text = await req.loadString();
   let data = null;
