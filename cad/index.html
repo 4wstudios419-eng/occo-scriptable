@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0b0b0b">
+  <title>ATLAS CAD</title>
+  <link rel="manifest" href="./manifest.json">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body data-theme="dark">
+  <header class="topbar">
+    <div>
+      <div class="eyebrow">OTTAWA COUNTY CORONER'S OFFICE</div>
+      <h1>ATLAS CAD</h1>
+    </div>
+    <button id="themeToggle" class="icon-btn" aria-label="Toggle day/night">☾</button>
+  </header>
+
+  <main id="app">
+    <section id="loginView" class="card auth-card hidden">
+      <h2>Sign in</h2>
+      <p>Use your ATLAS account.</p>
+      <label>Email<input id="email" type="email" autocomplete="username"></label>
+      <label>Password<input id="password" type="password" autocomplete="current-password"></label>
+      <button id="loginBtn" class="primary">Sign in</button>
+      <div id="loginStatus" class="status"></div>
+    </section>
+
+    <section id="dashboardView" class="hidden">
+      <div class="actions-row">
+        <button id="newCaseBtn" class="primary">+ New CAD Case</button>
+        <button id="refreshBtn">Refresh</button>
+      </div>
+      <section class="card">
+        <div class="section-head"><h2>Open Scene Responses</h2><span id="responseCount" class="pill">0</span></div>
+        <div id="responsesList" class="stack"></div>
+      </section>
+    </section>
+
+    <section id="newCaseView" class="hidden">
+      <button class="back" data-back="dashboard">‹ Back</button>
+      <section class="card">
+        <h2>New CAD Case</h2>
+        <div class="grid2">
+          <label class="span2">Decedent / Identifier<input id="caseIdentifier"></label>
+          <label>Reporting Agency<input id="reportingAgency"></label>
+          <label>Briefing Person<input id="briefingPerson"></label>
+          <label>Callback Number<input id="callbackNumber" type="tel"></label>
+          <label>ZIP<input id="zipCode" inputmode="numeric" maxlength="5"></label>
+          <label class="span2">Facility / Place<input id="facility" list="locationSuggestions" autocomplete="off"></label>
+          <datalist id="locationSuggestions"></datalist>
+          <label class="span2">Street Address<input id="street"></label>
+          <label>City<input id="city"></label>
+          <label>State<input id="state" value="OH"></label>
+          <label class="span2">Record Type<select id="recordClass"><option value="test_training">Test / Training</option><option value="official">Official</option></select></label>
+        </div>
+        <button id="createCaseBtn" class="primary full">Create Case & Open Response</button>
+        <div id="createStatus" class="status"></div>
+      </section>
+    </section>
+
+    <section id="responseView" class="hidden response-view">
+      <div class="response-head">
+        <button class="back" data-back="dashboard">‹ Responses</button>
+        <div>
+          <div id="responseCaseNumber" class="case-number"></div>
+          <div id="responseAddress" class="muted"></div>
+        </div>
+      </div>
+      <div class="map-wrap"><iframe id="mapFrame" title="Scene map" loading="eager"></iframe></div>
+      <div class="response-controls">
+        <button id="navigateBtn" class="navigate">NAVIGATE</button>
+        <div class="grid2">
+          <button data-stamp="responding_at">Responding / En Route</button>
+          <button data-stamp="on_scene_at">On Scene</button>
+          <button data-stamp="funeral_home_arrived_at">Funeral Home Arrived</button>
+          <button data-stamp="cleared_at" class="clear span2">Cleared Scene</button>
+          <button data-stamp="response_cancelled_at" class="cancel span2">Response Cancelled</button>
+        </div>
+        <div id="responseStatus" class="status"></div>
+      </div>
+    </section>
+  </main>
+
+  <script src="./app.js"></script>
+</body>
+</html>
