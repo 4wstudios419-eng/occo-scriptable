@@ -21,7 +21,9 @@ async function init(){
   $("createCaseBtn").onclick=createCase;
   document.querySelectorAll("[data-back]").forEach(b=>b.onclick=()=>{localStorage.removeItem(ACTIVE_CASE_KEY);loadDashboard();});
   document.querySelectorAll("[data-stamp]").forEach(b=>b.onclick=()=>stamp(b.dataset.stamp,b));
-  $("navigateBtn").onclick=navigate;
+  $("navigateBtn").onclick=navigateGoogle;
+  $("googleMapsBtn").onclick=navigateGoogle;
+  $("wazeBtn").onclick=navigateWaze;
   try{session=await restoreSession();}catch{}
   if(!session){show("loginView");return;}
   try{
@@ -116,12 +118,7 @@ async function createCase(){
       }
     };
     const r=await postJson(CAD_INGEST_URL,body,session.access_token);
-    const item={
-      case_id:r.case_id,
-      case_number:r.case_number,
-      dispatch_location_description:address,
-      stage:"Pending Response"
-    };
+    const item={case_id:r.case_id,case_number:r.case_number,dispatch_location_description:address,stage:"Pending Response"};
     $("sceneAddress").value="";
     await openResponse(item);
   }catch(e){setStatus("createStatus",e.message);}
@@ -132,12 +129,35 @@ async function openResponse(item){
   localStorage.setItem(ACTIVE_CASE_KEY,JSON.stringify(item));
   $("responseCaseNumber").textContent=item.case_number||"ATLAS Case";
   $("responseAddress").textContent=buildAddress(item)||"Location pending";
+  updateStage(item);
   const q=encodeURIComponent(buildAddress(item)||item.case_number||"Ottawa County Ohio");
   $("mapFrame").src=`https://www.google.com/maps?q=${q}&output=embed`;
-  document.querySelectorAll("[data-stamp]").forEach(b=>b.classList.remove("done"));
-  if(item.responding_time)document.querySelector('[data-stamp="responding_at"]').classList.add("done");
-  if(item.on_scene_time)document.querySelector('[data-stamp="on_scene_at"]').classList.add("done");
+  $("routeHeadline").textContent="Scene location ready";
+  $("routeDetail").textContent="Mapbox route, ETA, distance, and live position will populate here after token setup.";
+  resetStampButtons();
+  applySavedStamp("responding_at",item.responding_time);
+  applySavedStamp("on_scene_at",item.on_scene_time);
   show("responseView");
+}
+
+function resetStampButtons(){
+  document.querySelectorAll("[data-stamp]").forEach(b=>{
+    b.classList.remove("done");
+    const field=b.dataset.stamp;
+    b.innerHTML=stampLabel(field);
+  });
+}
+
+function applySavedStamp(field,value){
+  if(!value)return;
+  const b=document.querySelector(`[data-stamp="${field}"]`);
+  if(!b)return;
+  b.classList.add("done");
+  b.innerHTML=`${stampLabel(field)}<small>${formatClock(value)}</small>`;
+}
+
+function stampLabel(field){
+  return({responding_at:"Responding / En Route",on_scene_at:"On Scene",cleared_at:"Cleared Scene",response_cancelled_at:"Response Cancelled"})[field]||field;
 }
 
 async function stamp(field,button){
@@ -145,10 +165,17 @@ async function stamp(field,button){
   try{
     setStatus("responseStatus","Saving…");
     session=await restoreSession()||session;
-    const fields={[field]:new Date().toISOString()};
+    const now=new Date();
+    const iso=now.toISOString();
+    const fields={[field]:iso};
     if(field==="responding_at"||field==="on_scene_at")fields.scene_response_required=true;
     await postJson(CAD_INGEST_URL,{source:"occo_cad_pwa",external_event_id:`response-${activeCase.case_id}-${field}-${Date.now()}`,case_id:activeCase.case_id,event_type:"response_timestamp",fields},session.access_token);
     button.classList.add("done");
+    button.innerHTML=`${stampLabel(field)}<small>${formatClock(iso)}</small>`;
+    if(field==="responding_at"){activeCase.responding_time=iso;activeCase.stage="Responding / En Route";}
+    if(field==="on_scene_at"){activeCase.on_scene_time=iso;activeCase.stage="On Scene";}
+    localStorage.setItem(ACTIVE_CASE_KEY,JSON.stringify(activeCase));
+    updateStage(activeCase);
     setStatus("responseStatus","Saved to ATLAS.");
     if(field==="cleared_at"||field==="response_cancelled_at"){
       localStorage.removeItem(ACTIVE_CASE_KEY);
@@ -157,10 +184,21 @@ async function stamp(field,button){
   }catch(e){setStatus("responseStatus",e.message);}
 }
 
-function navigate(){
-  if(!activeCase)return;
-  const q=encodeURIComponent(buildAddress(activeCase)||"");
+function updateStage(item){
+  $("responseStage").textContent=item?.on_scene_time?"ON SCENE":item?.responding_time?"EN ROUTE":"PENDING";
+}
+
+function navigationDestination(){return buildAddress(activeCase)||"";}
+function navigateGoogle(){
+  const destination=navigationDestination();
+  if(!destination)return setStatus("responseStatus","Scene location is missing.");
+  const q=encodeURIComponent(destination);
   window.location.href=`https://www.google.com/maps/dir/?api=1&destination=${q}&travelmode=driving&dir_action=navigate`;
+}
+function navigateWaze(){
+  const destination=navigationDestination();
+  if(!destination)return setStatus("responseStatus","Scene location is missing.");
+  window.location.href=`https://www.waze.com/ul?q=${encodeURIComponent(destination)}&navigate=yes`;
 }
 
 async function getOpenResponses(){
@@ -172,8 +210,7 @@ async function getOpenResponses(){
   const notes=await getJson(`${SUPABASE_URL}/rest/v1/case_notification?case_id=in.${encodeURIComponent(ids)}&select=case_id,dispatch_location_description,dispatch_street_address,dispatch_unit,dispatch_city,dispatch_state,dispatch_zip,scene_response_required,responding_time,on_scene_time,cleared_time,response_cancelled_time`,session.access_token);
   const map=new Map((notes||[]).map(n=>[n.case_id,n]));
   const cutoff=Date.now()-48*3600000;
-  return cases
-    .map(c=>({...c,...(map.get(c.id)||{}),case_id:c.id}))
+  return cases.map(c=>({...c,...(map.get(c.id)||{}),case_id:c.id}))
     .filter(x=>!x.cleared_time&&!x.response_cancelled_time)
     .filter(x=>x.responding_time||x.on_scene_time||x.scene_response_required===true||new Date(x.created_at).getTime()>=cutoff)
     .map(x=>({...x,stage:x.on_scene_time?"On Scene":x.responding_time?"Responding / En Route":"Pending Response"}));
@@ -183,24 +220,17 @@ async function postJson(url,body,token=null){
   const h={apikey:SUPABASE_KEY,"Content-Type":"application/json"};
   if(token)h.Authorization=`Bearer ${token}`;
   const r=await fetch(url,{method:"POST",headers:h,body:JSON.stringify(body)});
-  const t=await r.text();
-  let d=null;
-  try{d=t?JSON.parse(t):null}catch{}
-  if(!r.ok)throw new Error(d?.error||d?.message||t||`Request failed (${r.status})`);
-  return d;
+  const t=await r.text();let d=null;try{d=t?JSON.parse(t):null}catch{}
+  if(!r.ok)throw new Error(d?.error||d?.message||t||`Request failed (${r.status})`);return d;
 }
-
 async function getJson(url,token){
   const r=await fetch(url,{headers:{apikey:SUPABASE_KEY,Authorization:`Bearer ${token}`}});
-  const t=await r.text();
-  let d=null;
-  try{d=t?JSON.parse(t):null}catch{}
-  if(!r.ok)throw new Error(d?.message||t||`Request failed (${r.status})`);
-  return d;
+  const t=await r.text();let d=null;try{d=t?JSON.parse(t):null}catch{}
+  if(!r.ok)throw new Error(d?.message||t||`Request failed (${r.status})`);return d;
 }
-
-function buildAddress(x){return [x.dispatch_location_description,x.dispatch_street_address,x.dispatch_unit,x.dispatch_city,x.dispatch_state,x.dispatch_zip].filter(Boolean).join(", ");}
+function buildAddress(x){return [x?.dispatch_location_description,x?.dispatch_street_address,x?.dispatch_unit,x?.dispatch_city,x?.dispatch_state,x?.dispatch_zip].filter(Boolean).join(", ");}
 function setStatus(id,msg){$(id).textContent=msg||"";}
 function esc(v){return String(v||"").replace(/[&<>'"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[c]));}
 function localDate(d){return`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;}
 function localTime(d){return`${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;}
+function formatClock(v){try{return new Date(v).toLocaleTimeString([],{hour:"numeric",minute:"2-digit"});}catch{return"";}}
