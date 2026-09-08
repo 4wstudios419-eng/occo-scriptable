@@ -6,6 +6,7 @@ const ACTIVE_CASE_KEY="atlas_cad_active_case_v1";
 const THEME_KEY="atlas_cad_theme_v1";
 const MAPBOX_CONFIG_URL="/.netlify/functions/mapbox-config";
 let session=null,activeCase=null,mapboxToken=null,routeMap=null,userMarker=null,destinationMarker=null;
+let destinationCoords=null,destinationLabel="",navigationActive=false,watchId=null,lastRouteAt=0,lastRouteOrigin=null,lastPosition=null,lastRoute=null;
 
 const $=id=>document.getElementById(id);
 const views=["loginView","dashboardView","newCaseView","responseView"];
@@ -20,11 +21,12 @@ async function init(){
   $("newCaseBtn").onclick=()=>show("newCaseView");
   $("refreshBtn").onclick=loadDashboard;
   $("createCaseBtn").onclick=createCase;
-  document.querySelectorAll("[data-back]").forEach(b=>b.onclick=()=>{localStorage.removeItem(ACTIVE_CASE_KEY);loadDashboard();});
+  document.querySelectorAll("[data-back]").forEach(b=>b.onclick=()=>{stopNavigation();localStorage.removeItem(ACTIVE_CASE_KEY);loadDashboard();});
   document.querySelectorAll("[data-stamp]").forEach(b=>b.onclick=()=>stamp(b.dataset.stamp,b));
-  $("navigateBtn").onclick=navigateGoogle;
+  $("navigateBtn").onclick=toggleNavigation;
   $("googleMapsBtn").onclick=navigateGoogle;
   $("wazeBtn").onclick=navigateWaze;
+  $("recenterBtn").onclick=recenterMap;
   try{mapboxToken=await loadMapboxToken();}catch{}
   try{session=await restoreSession();}catch{}
   if(!session){show("loginView");return;}
@@ -77,6 +79,7 @@ function normalizeSession(r){
 }
 
 async function loadDashboard(){
+  stopNavigation();
   try{
     session=await restoreSession()||session;
     if(!session){show("loginView");return;}
@@ -127,6 +130,7 @@ async function createCase(){
 }
 
 async function openResponse(item){
+  stopNavigation();
   activeCase=item;
   localStorage.setItem(ACTIVE_CASE_KEY,JSON.stringify(item));
   $("responseCaseNumber").textContent=item.case_number||"ATLAS Case";
@@ -136,36 +140,35 @@ async function openResponse(item){
   applySavedStamp("responding_at",item.responding_time);
   applySavedStamp("on_scene_at",item.on_scene_time);
   show("responseView");
-  setTimeout(()=>prepareRoute(item),50);
+  setTimeout(()=>prepareRoute(item),80);
 }
 
 async function prepareRoute(item){
-  const destination=buildAddress(item);
+  destinationLabel=buildAddress(item);
+  destinationCoords=null;
+  $("routeTimeRemaining").textContent="--";
+  $("routeDistance").textContent="--";
   $("routeEta").textContent="--";
   $("nextManeuver").classList.add("hidden");
-  if(!destination){
-    $("routeHeadline").textContent="Scene location missing";
-    $("routeDetail").textContent="Add or correct the scene address in ATLAS.";
+  $("navManeuverBanner").classList.add("hidden");
+  if(!destinationLabel){
+    $("routeDetail").textContent="Scene location missing. Add or correct the address in ATLAS.";
     return;
   }
-  if(!mapboxToken){
-    try{mapboxToken=await loadMapboxToken();}catch{}
-  }
+  if(!mapboxToken){try{mapboxToken=await loadMapboxToken();}catch{}}
   if(!mapboxToken||typeof mapboxgl==="undefined"){
-    $("routeHeadline").textContent="Mapbox unavailable";
-    $("routeDetail").textContent="Google Maps and Waze remain available below.";
+    $("routeDetail").textContent="Mapbox unavailable. Google Maps and Waze remain available below.";
     return;
   }
   try{
-    $("routeHeadline").textContent="Locating scene…";
-    $("routeDetail").textContent=destination;
-    const dest=await geocodeAddress(destination);
-    if(!dest)throw new Error("Scene address could not be located.");
-    const origin=await currentPosition();
-    await renderRoute(origin,dest,destination);
+    $("routeDetail").textContent="Locating scene and current position…";
+    destinationCoords=await geocodeAddress(destinationLabel);
+    if(!destinationCoords)throw new Error("Scene address could not be located.");
+    const pos=await currentPositionFull();
+    lastPosition=pos;
+    await buildAndRenderRoute([pos.coords.longitude,pos.coords.latitude],destinationCoords,false);
   }catch(e){
-    $("routeHeadline").textContent="Route unavailable";
-    $("routeDetail").textContent=e.message||"Use Google Maps or Waze below.";
+    $("routeDetail").textContent=e.message||"Route unavailable. Use Google Maps or Waze below.";
   }
 }
 
@@ -182,61 +185,150 @@ async function geocodeAddress(address){
   const d=await r.json();
   if(!r.ok)throw new Error(d.message||"Unable to locate scene address.");
   const feature=d.features?.[0];
-  if(!feature?.geometry?.coordinates)return null;
-  return feature.geometry.coordinates;
+  return feature?.geometry?.coordinates||null;
 }
 
-function currentPosition(){
+function currentPositionFull(){
   return new Promise((resolve,reject)=>{
     if(!navigator.geolocation)return reject(new Error("Location services are not available on this device."));
-    navigator.geolocation.getCurrentPosition(
-      p=>resolve([p.coords.longitude,p.coords.latitude]),
-      ()=>reject(new Error("Allow location access to build the live route.")),
-      {enableHighAccuracy:true,timeout:12000,maximumAge:15000}
-    );
+    navigator.geolocation.getCurrentPosition(resolve,()=>reject(new Error("Allow location access to build the live route.")),{enableHighAccuracy:true,timeout:12000,maximumAge:10000});
   });
 }
 
-async function renderRoute(origin,dest,destinationLabel){
+async function buildAndRenderRoute(origin,dest,followMode){
   mapboxgl.accessToken=mapboxToken;
-  if(routeMap){routeMap.remove();routeMap=null;}
-  routeMap=new mapboxgl.Map({container:"map",style:"mapbox://styles/mapbox/standard",center:origin,zoom:12,attributionControl:true});
-  routeMap.addControl(new mapboxgl.NavigationControl({showCompass:false}),"top-right");
   const directionsUrl=`https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${origin[0]},${origin[1]};${dest[0]},${dest[1]}?alternatives=false&geometries=geojson&overview=full&steps=true&access_token=${encodeURIComponent(mapboxToken)}`;
   const r=await fetch(directionsUrl);
   const d=await r.json();
   if(!r.ok||!d.routes?.length)throw new Error(d.message||"No driving route was found.");
-  const route=d.routes[0];
+  lastRoute=d.routes[0];
+  lastRouteAt=Date.now();
+  lastRouteOrigin=origin;
+  updateRouteSummary(lastRoute);
+
+  if(!routeMap){
+    routeMap=new mapboxgl.Map({container:"map",style:"mapbox://styles/mapbox/standard",center:origin,zoom:12,attributionControl:true});
+    routeMap.addControl(new mapboxgl.NavigationControl({showCompass:false}),"top-right");
+    await new Promise(resolve=>routeMap.on("load",resolve));
+  }
+
+  const geo={type:"Feature",properties:{},geometry:lastRoute.geometry};
+  const source=routeMap.getSource("atlas-route");
+  if(source)source.setData(geo);
+  else{
+    routeMap.addSource("atlas-route",{type:"geojson",data:geo});
+    routeMap.addLayer({id:"atlas-route-line",type:"line",source:"atlas-route",layout:{"line-join":"round","line-cap":"round"},paint:{"line-color":"#e8b832","line-width":6,"line-opacity":0.92}});
+  }
+  if(!userMarker)userMarker=new mapboxgl.Marker({color:"#2d7ff9"}).setLngLat(origin).addTo(routeMap);else userMarker.setLngLat(origin);
+  if(!destinationMarker)destinationMarker=new mapboxgl.Marker({color:"#e8b832"}).setLngLat(dest).addTo(routeMap);else destinationMarker.setLngLat(dest);
+
+  if(followMode){
+    followPosition(lastPosition);
+  }else{
+    const bounds=new mapboxgl.LngLatBounds();
+    lastRoute.geometry.coordinates.forEach(c=>bounds.extend(c));
+    routeMap.fitBounds(bounds,{padding:48,maxZoom:15,duration:500});
+  }
+}
+
+function updateRouteSummary(route){
   const minutes=Math.max(1,Math.round(route.duration/60));
   const miles=route.distance/1609.344;
   const arrival=new Date(Date.now()+route.duration*1000);
-  $("routeHeadline").textContent=`${minutes} min · ${miles.toFixed(miles<10?1:0)} mi`;
-  $("routeDetail").textContent=`Estimated arrival ${formatClock(arrival)} · ${destinationLabel}`;
+  $("routeTimeRemaining").textContent=formatDuration(minutes);
+  $("routeDistance").textContent=`${miles.toFixed(miles<10?1:0)} mi`;
   $("routeEta").textContent=formatClock(arrival);
-  const steps=route.legs?.[0]?.steps||[];
+  $("routeDetail").textContent=`Estimated arrival ${formatClock(arrival)} · ${destinationLabel}`;
+  updateManeuver(route);
+}
+
+function updateManeuver(route){
+  const steps=route?.legs?.[0]?.steps||[];
   const maneuver=steps.find(s=>s?.maneuver?.instruction&&s.distance>20)||steps[0];
-  if(maneuver?.maneuver?.instruction){
-    $("nextManeuver").innerHTML=`${esc(maneuver.maneuver.instruction)}<small>${maneuver.distance>160?`${(maneuver.distance/1609.344).toFixed(1)} mi`:Math.round(maneuver.distance*3.28084)+" ft"}</small>`;
-    $("nextManeuver").classList.remove("hidden");
+  if(!maneuver?.maneuver?.instruction)return;
+  const distance=formatDistance(maneuver.distance);
+  $("nextManeuver").innerHTML=`${esc(maneuver.maneuver.instruction)}<small>${distance}</small>`;
+  $("nextManeuver").classList.remove("hidden");
+  $("navManeuverText").textContent=maneuver.maneuver.instruction;
+  $("navManeuverDistance").textContent=distance;
+  $("navManeuverIcon").textContent=maneuverIcon(maneuver.maneuver.type,maneuver.maneuver.modifier);
+}
+
+function maneuverIcon(type,modifier){
+  if(type==="arrive")return"●";
+  if(modifier?.includes("left"))return"↰";
+  if(modifier?.includes("right"))return"↱";
+  if(type==="roundabout")return"⟳";
+  return"↑";
+}
+
+async function toggleNavigation(){
+  if(navigationActive){stopNavigation();return;}
+  if(!destinationCoords){
+    setStatus("responseStatus","Route is still preparing.");
+    return;
   }
-  await new Promise(resolve=>routeMap.on("load",resolve));
-  routeMap.addSource("atlas-route",{type:"geojson",data:{type:"Feature",properties:{},geometry:route.geometry}});
-  routeMap.addLayer({id:"atlas-route-line",type:"line",source:"atlas-route",layout:{"line-join":"round","line-cap":"round"},paint:{"line-color":"#e8b832","line-width":6,"line-opacity":0.92}});
-  userMarker=new mapboxgl.Marker({color:"#2d7ff9"}).setLngLat(origin).addTo(routeMap);
-  destinationMarker=new mapboxgl.Marker({color:"#e8b832"}).setLngLat(dest).addTo(routeMap);
-  const bounds=new mapboxgl.LngLatBounds();
-  route.geometry.coordinates.forEach(c=>bounds.extend(c));
-  routeMap.fitBounds(bounds,{padding:48,maxZoom:15,duration:500});
+  if(!navigator.geolocation){
+    setStatus("responseStatus","Location services are unavailable.");
+    return;
+  }
+  navigationActive=true;
+  $("responseView").classList.add("navigation-active");
+  $("navManeuverBanner").classList.remove("hidden");
+  $("recenterBtn").classList.remove("hidden");
+  $("navigateBtn").textContent="END IN-APP NAVIGATION";
+  $("navigateBtn").classList.add("nav-active");
+  setStatus("responseStatus","ATLAS navigation active.");
+  watchId=navigator.geolocation.watchPosition(handleNavigationPosition,handleNavigationError,{enableHighAccuracy:true,maximumAge:2000,timeout:15000});
+}
+
+async function handleNavigationPosition(pos){
+  lastPosition=pos;
+  const origin=[pos.coords.longitude,pos.coords.latitude];
+  if(userMarker)userMarker.setLngLat(origin);
+  followPosition(pos);
+  const moved=!lastRouteOrigin||distanceMeters(lastRouteOrigin,origin)>75;
+  const stale=Date.now()-lastRouteAt>20000;
+  if((moved||stale)&&destinationCoords){
+    try{await buildAndRenderRoute(origin,destinationCoords,true);}catch(e){setStatus("responseStatus",e.message||"Route update failed.");}
+  }
+}
+
+function handleNavigationError(){
+  setStatus("responseStatus","Live GPS update paused. Check location permissions.");
+}
+
+function followPosition(pos){
+  if(!routeMap||!pos)return;
+  const center=[pos.coords.longitude,pos.coords.latitude];
+  const heading=Number.isFinite(pos.coords.heading)&&pos.coords.heading>=0?pos.coords.heading:routeMap.getBearing();
+  routeMap.easeTo({center,zoom:16.3,bearing:heading,pitch:45,duration:650,essential:true});
+}
+
+function recenterMap(){if(lastPosition)followPosition(lastPosition);}
+
+function stopNavigation(){
+  if(watchId!==null&&navigator.geolocation)navigator.geolocation.clearWatch(watchId);
+  watchId=null;
+  navigationActive=false;
+  const view=$("responseView");
+  if(view)view.classList.remove("navigation-active");
+  if($("navManeuverBanner"))$("navManeuverBanner").classList.add("hidden");
+  if($("recenterBtn"))$("recenterBtn").classList.add("hidden");
+  if($("navigateBtn")){$("navigateBtn").textContent="START NAVIGATION";$("navigateBtn").classList.remove("nav-active");}
+}
+
+function distanceMeters(a,b){
+  const R=6371000,rad=Math.PI/180;
+  const dLat=(b[1]-a[1])*rad,dLon=(b[0]-a[0])*rad;
+  const lat1=a[1]*rad,lat2=b[1]*rad;
+  const h=Math.sin(dLat/2)**2+Math.cos(lat1)*Math.cos(lat2)*Math.sin(dLon/2)**2;
+  return 2*R*Math.asin(Math.sqrt(h));
 }
 
 function resetStampButtons(){
-  document.querySelectorAll("[data-stamp]").forEach(b=>{
-    b.classList.remove("done");
-    const field=b.dataset.stamp;
-    b.innerHTML=stampLabel(field);
-  });
+  document.querySelectorAll("[data-stamp]").forEach(b=>{b.classList.remove("done");b.innerHTML=stampLabel(b.dataset.stamp);});
 }
-
 function applySavedStamp(field,value){
   if(!value)return;
   const b=document.querySelector(`[data-stamp="${field}"]`);
@@ -244,18 +336,14 @@ function applySavedStamp(field,value){
   b.classList.add("done");
   b.innerHTML=`${stampLabel(field)}<small>${formatClock(value)}</small>`;
 }
-
-function stampLabel(field){
-  return({responding_at:"Responding / En Route",on_scene_at:"On Scene",cleared_at:"Cleared Scene",response_cancelled_at:"Response Cancelled"})[field]||field;
-}
+function stampLabel(field){return({responding_at:"Responding / En Route",on_scene_at:"On Scene",cleared_at:"Cleared Scene",response_cancelled_at:"Response Cancelled"})[field]||field;}
 
 async function stamp(field,button){
   if(!activeCase?.case_id)return;
   try{
     setStatus("responseStatus","Saving…");
     session=await restoreSession()||session;
-    const now=new Date();
-    const iso=now.toISOString();
+    const iso=new Date().toISOString();
     const fields={[field]:iso};
     if(field==="responding_at"||field==="on_scene_at")fields.scene_response_required=true;
     await postJson(CAD_INGEST_URL,{source:"occo_cad_pwa",external_event_id:`response-${activeCase.case_id}-${field}-${Date.now()}`,case_id:activeCase.case_id,event_type:"response_timestamp",fields},session.access_token);
@@ -267,22 +355,17 @@ async function stamp(field,button){
     updateStage(activeCase);
     setStatus("responseStatus","Saved to ATLAS.");
     if(field==="cleared_at"||field==="response_cancelled_at"){
-      localStorage.removeItem(ACTIVE_CASE_KEY);
-      setTimeout(loadDashboard,700);
+      stopNavigation();localStorage.removeItem(ACTIVE_CASE_KEY);setTimeout(loadDashboard,700);
     }
   }catch(e){setStatus("responseStatus",e.message);}
 }
 
-function updateStage(item){
-  $("responseStage").textContent=item?.on_scene_time?"ON SCENE":item?.responding_time?"EN ROUTE":"PENDING";
-}
-
+function updateStage(item){$("responseStage").textContent=item?.on_scene_time?"ON SCENE":item?.responding_time?"EN ROUTE":"PENDING";}
 function navigationDestination(){return buildAddress(activeCase)||"";}
 function navigateGoogle(){
   const destination=navigationDestination();
   if(!destination)return setStatus("responseStatus","Scene location is missing.");
-  const q=encodeURIComponent(destination);
-  window.location.href=`https://www.google.com/maps/dir/?api=1&destination=${q}&travelmode=driving&dir_action=navigate`;
+  window.location.href=`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destination)}&travelmode=driving&dir_action=navigate`;
 }
 function navigateWaze(){
   const destination=navigationDestination();
@@ -323,3 +406,5 @@ function esc(v){return String(v||"").replace(/[&<>'"]/g,c=>({"&":"&amp;","<":"&l
 function localDate(d){return`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;}
 function localTime(d){return`${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;}
 function formatClock(v){try{return new Date(v).toLocaleTimeString([],{hour:"numeric",minute:"2-digit"});}catch{return"";}}
+function formatDuration(minutes){if(minutes<60)return`${minutes} min`;const h=Math.floor(minutes/60),m=minutes%60;return m?`${h} hr ${m} min`:`${h} hr`;}
+function formatDistance(meters){return meters>160?`${(meters/1609.344).toFixed(meters<1609?1:0)} mi`:`${Math.max(1,Math.round(meters*3.28084))} ft`;}
