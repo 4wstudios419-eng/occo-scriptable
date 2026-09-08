@@ -53,17 +53,34 @@
     </section>
 
     <section id="responseView" class="hidden response-view">
-      <div class="response-head">
+      <div class="response-head compact-head">
         <button class="back" data-back="dashboard">‹ Responses</button>
-        <div>
+        <div class="response-identity">
           <div id="responseCaseNumber" class="case-number"></div>
-          <div id="responseAddress" class="muted"></div>
+          <div id="responseAddress" class="response-address"></div>
         </div>
+        <span id="responseStage" class="stage-pill">PENDING</span>
       </div>
-      <div class="map-wrap"><iframe id="mapFrame" title="Scene map" loading="eager"></iframe></div>
+
+      <section class="route-card">
+        <div class="route-label">SCENE MAP</div>
+        <div class="map-wrap"><iframe id="mapFrame" title="Scene map" loading="eager"></iframe></div>
+        <div class="route-meta">
+          <div>
+            <strong id="routeHeadline">Route display</strong>
+            <span id="routeDetail">Mapbox ETA, distance, and live route will populate here after token setup.</span>
+          </div>
+        </div>
+      </section>
+
       <div class="response-controls">
-        <button id="navigateBtn" class="navigate">NAVIGATE NOW</button>
-        <div class="grid2">
+        <button id="navigateBtn" class="navigate">START NAVIGATION</button>
+        <div class="nav-fallbacks">
+          <button id="googleMapsBtn">Google Maps</button>
+          <button id="wazeBtn">Waze</button>
+        </div>
+
+        <div class="grid2 response-stamps">
           <button data-stamp="responding_at">Responding / En Route</button>
           <button data-stamp="on_scene_at">On Scene</button>
           <button data-stamp="cleared_at" class="clear span2">Cleared Scene</button>
