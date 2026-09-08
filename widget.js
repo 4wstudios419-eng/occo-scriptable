@@ -96,6 +96,15 @@ async function cadQuickStart(){
     const state = second.textFieldValue(4).trim();
     const zip = second.textFieldValue(5).trim();
 
+    const recordAlert = new Alert();
+    recordAlert.title = "Record Type";
+    recordAlert.addAction("Test / Training");
+    recordAlert.addAction("Official");
+    recordAlert.addCancelAction("Cancel");
+    const recordIndex = await recordAlert.presentSheet();
+    if (recordIndex < 0) return;
+    const recordClass = recordIndex === 0 ? "test_training" : "official";
+
     const classAlert = new Alert();
     classAlert.title = "Case Classification";
     ["Investigative", "Non-Investigative"].forEach(x=>classAlert.addAction(x));
@@ -131,7 +140,7 @@ async function cadQuickStart(){
     const circumstances = note.textFieldValue(0).trim();
 
     const fresh = await ensureSession(true);
-    const caseRow = await createNumberedCase(fresh, profile.user_id, caseCategory);
+    const caseRow = await createNumberedCase(fresh, profile.user_id, caseCategory, recordClass);
     await saveDecedent(fresh, caseRow.id, decedent, profile.user_id);
 
     const now = new Date();
@@ -191,8 +200,8 @@ async function getProfile(session){
   const rows = await getJson(`${SUPABASE_URL}/rest/v1/user_profiles?user_id=eq.${encodeURIComponent(uid)}&select=user_id,display_name,email,role,active`, session.access_token);
   if(!rows?.length) throw new Error("No OCCO profile is assigned to this ATLAS account."); return rows[0];
 }
-async function createNumberedCase(session, leadId, category){
-  return await postJson(`${SUPABASE_URL}/rest/v1/rpc/create_numbered_case`, {p_case_category:category,p_record_class:"official",p_lead_investigator_id:leadId,p_record_class_reason:null}, session.access_token, false);
+async function createNumberedCase(session, leadId, category, recordClass){
+  return await postJson(`${SUPABASE_URL}/rest/v1/rpc/create_numbered_case`, {p_case_category:category,p_record_class:recordClass,p_lead_investigator_id:leadId,p_record_class_reason:recordClass==="test_training"?"CAD widget test / training record":null}, session.access_token, false);
 }
 async function saveDecedent(session, caseId, decedent, userId){
   const req = new Request(`${SUPABASE_URL}/rest/v1/case_decedent?on_conflict=case_id`); req.method="POST";
