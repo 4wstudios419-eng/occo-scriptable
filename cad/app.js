@@ -4,7 +4,8 @@ const CAD_INGEST_URL=`${SUPABASE_URL}/functions/v1/atlas-cad-ingest`;
 const SESSION_KEY="atlas_cad_pwa_session_v1";
 const ACTIVE_CASE_KEY="atlas_cad_active_case_v1";
 const THEME_KEY="atlas_cad_theme_v1";
-let session=null,activeCase=null;
+const MAPBOX_CONFIG_URL="/.netlify/functions/mapbox-config";
+let session=null,activeCase=null,mapboxToken=null,routeMap=null,userMarker=null,destinationMarker=null;
 
 const $=id=>document.getElementById(id);
 const views=["loginView","dashboardView","newCaseView","responseView"];
@@ -24,6 +25,7 @@ async function init(){
   $("navigateBtn").onclick=navigateGoogle;
   $("googleMapsBtn").onclick=navigateGoogle;
   $("wazeBtn").onclick=navigateWaze;
+  try{mapboxToken=await loadMapboxToken();}catch{}
   try{session=await restoreSession();}catch{}
   if(!session){show("loginView");return;}
   try{
@@ -130,14 +132,101 @@ async function openResponse(item){
   $("responseCaseNumber").textContent=item.case_number||"ATLAS Case";
   $("responseAddress").textContent=buildAddress(item)||"Location pending";
   updateStage(item);
-  const q=encodeURIComponent(buildAddress(item)||item.case_number||"Ottawa County Ohio");
-  $("mapFrame").src=`https://www.google.com/maps?q=${q}&output=embed`;
-  $("routeHeadline").textContent="Scene location ready";
-  $("routeDetail").textContent="Mapbox route, ETA, distance, and live position will populate here after token setup.";
   resetStampButtons();
   applySavedStamp("responding_at",item.responding_time);
   applySavedStamp("on_scene_at",item.on_scene_time);
   show("responseView");
+  setTimeout(()=>prepareRoute(item),50);
+}
+
+async function prepareRoute(item){
+  const destination=buildAddress(item);
+  $("routeEta").textContent="--";
+  $("nextManeuver").classList.add("hidden");
+  if(!destination){
+    $("routeHeadline").textContent="Scene location missing";
+    $("routeDetail").textContent="Add or correct the scene address in ATLAS.";
+    return;
+  }
+  if(!mapboxToken){
+    try{mapboxToken=await loadMapboxToken();}catch{}
+  }
+  if(!mapboxToken||typeof mapboxgl==="undefined"){
+    $("routeHeadline").textContent="Mapbox unavailable";
+    $("routeDetail").textContent="Google Maps and Waze remain available below.";
+    return;
+  }
+  try{
+    $("routeHeadline").textContent="Locating scene…";
+    $("routeDetail").textContent=destination;
+    const dest=await geocodeAddress(destination);
+    if(!dest)throw new Error("Scene address could not be located.");
+    const origin=await currentPosition();
+    await renderRoute(origin,dest,destination);
+  }catch(e){
+    $("routeHeadline").textContent="Route unavailable";
+    $("routeDetail").textContent=e.message||"Use Google Maps or Waze below.";
+  }
+}
+
+async function loadMapboxToken(){
+  const r=await fetch(MAPBOX_CONFIG_URL,{cache:"no-store"});
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok||!d.token)throw new Error(d.error||"Mapbox configuration unavailable.");
+  return d.token;
+}
+
+async function geocodeAddress(address){
+  const url=`https://api.mapbox.com/search/geocode/v6/forward?q=${encodeURIComponent(address)}&limit=1&country=US&access_token=${encodeURIComponent(mapboxToken)}`;
+  const r=await fetch(url);
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.message||"Unable to locate scene address.");
+  const feature=d.features?.[0];
+  if(!feature?.geometry?.coordinates)return null;
+  return feature.geometry.coordinates;
+}
+
+function currentPosition(){
+  return new Promise((resolve,reject)=>{
+    if(!navigator.geolocation)return reject(new Error("Location services are not available on this device."));
+    navigator.geolocation.getCurrentPosition(
+      p=>resolve([p.coords.longitude,p.coords.latitude]),
+      ()=>reject(new Error("Allow location access to build the live route.")),
+      {enableHighAccuracy:true,timeout:12000,maximumAge:15000}
+    );
+  });
+}
+
+async function renderRoute(origin,dest,destinationLabel){
+  mapboxgl.accessToken=mapboxToken;
+  if(routeMap){routeMap.remove();routeMap=null;}
+  routeMap=new mapboxgl.Map({container:"map",style:"mapbox://styles/mapbox/standard",center:origin,zoom:12,attributionControl:true});
+  routeMap.addControl(new mapboxgl.NavigationControl({showCompass:false}),"top-right");
+  const directionsUrl=`https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${origin[0]},${origin[1]};${dest[0]},${dest[1]}?alternatives=false&geometries=geojson&overview=full&steps=true&access_token=${encodeURIComponent(mapboxToken)}`;
+  const r=await fetch(directionsUrl);
+  const d=await r.json();
+  if(!r.ok||!d.routes?.length)throw new Error(d.message||"No driving route was found.");
+  const route=d.routes[0];
+  const minutes=Math.max(1,Math.round(route.duration/60));
+  const miles=route.distance/1609.344;
+  const arrival=new Date(Date.now()+route.duration*1000);
+  $("routeHeadline").textContent=`${minutes} min · ${miles.toFixed(miles<10?1:0)} mi`;
+  $("routeDetail").textContent=`Estimated arrival ${formatClock(arrival)} · ${destinationLabel}`;
+  $("routeEta").textContent=formatClock(arrival);
+  const steps=route.legs?.[0]?.steps||[];
+  const maneuver=steps.find(s=>s?.maneuver?.instruction&&s.distance>20)||steps[0];
+  if(maneuver?.maneuver?.instruction){
+    $("nextManeuver").innerHTML=`${esc(maneuver.maneuver.instruction)}<small>${maneuver.distance>160?`${(maneuver.distance/1609.344).toFixed(1)} mi`:Math.round(maneuver.distance*3.28084)+" ft"}</small>`;
+    $("nextManeuver").classList.remove("hidden");
+  }
+  await new Promise(resolve=>routeMap.on("load",resolve));
+  routeMap.addSource("atlas-route",{type:"geojson",data:{type:"Feature",properties:{},geometry:route.geometry}});
+  routeMap.addLayer({id:"atlas-route-line",type:"line",source:"atlas-route",layout:{"line-join":"round","line-cap":"round"},paint:{"line-color":"#e8b832","line-width":6,"line-opacity":0.92}});
+  userMarker=new mapboxgl.Marker({color:"#2d7ff9"}).setLngLat(origin).addTo(routeMap);
+  destinationMarker=new mapboxgl.Marker({color:"#e8b832"}).setLngLat(dest).addTo(routeMap);
+  const bounds=new mapboxgl.LngLatBounds();
+  route.geometry.coordinates.forEach(c=>bounds.extend(c));
+  routeMap.fitBounds(bounds,{padding:48,maxZoom:15,duration:500});
 }
 
 function resetStampButtons(){
