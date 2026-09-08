@@ -1,0 +1,10 @@
+{
+  "name": "ATLAS CAD",
+  "short_name": "ATLAS CAD",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#090909",
+  "theme_color": "#0b0b0b",
+  "description": "ATLAS field CAD and scene response workspace"
+}
